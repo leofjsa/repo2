@@ -1,0 +1,359 @@
+Analysis of movements sensors
+==========================================
+
+## Introduction
+The goal of this project is to predict the manner in which people did a set of exercises in a 'quality movement' experiement. In this experiement, a group of 6 people was asked to do some weigth lifting wearing sensores in their bodies. They were asked to do some different exercises in different manners, so that it generate a classification variable ('classe')
+
+## Building the model
+The steps to build the model were:  
+1) Training dataset spliting  
+2) Variables mapping  
+3) Plotting the predictors  
+4) Preprocessing the data  
+5) Development of prediction model  
+6) Results, cross-validation and test  
+7) Expected and final results  
+
+``` {r echo=FALSE, results='hide'}
+# Initial setup
+setwd("C:/Users/LeonardoF/Dropbox/Desenvolvimento/Coursera - Data Science Specialization (Johns Hopkins)/Geral/R wd/Assignments/8-Machine learning")
+#install.packages("caret")
+library(lattice)
+library(ggplot2)
+library(caret)
+
+############################################
+# GETTING DATA
+############################################
+
+fileNameTrain <- "pml-training.csv"
+dataTrainFull <- read.csv(fileNameTrain, sep=",", header=TRUE)
+fileNameTestFinal <- "pml-testing.csv"
+dataTestFull <- read.csv(fileNameTestFinal, sep=",", header=TRUE)
+
+# Split training data
+set.seed(1000)
+index1 <- createDataPartition(y=dataTrainFull$classe, 
+                             p = 0.6,
+                             list=FALSE)
+dataTrain1 <- dataTrainFull[index1, ]
+
+dataTemp <- dataTrainFull[-index1, ]
+index2 <- createDataPartition(y=dataTemp$classe, 
+                             p = 0.5,
+                             list=FALSE)
+dataTrain2 <- dataTemp[index2, ]
+
+dataTrain3 <- dataTemp[-index2, ]
+```
+
+### 1) Training dataset spliting
+In order to allow future cross validation, the training dataset was split using **random subsampling**. A first training sample was generated with 60% of the total training data and then other 2 other samples (one for cross validation and another for testing) were generated with 20% of the data each.
+
+
+### 2) Variables mapping
+The next step was to map the variables to identify:  
+* What are the variables in the dataset  
+* What are their classes (numeric continuous, numeric discrete, factor or text)  
+* Which ones may considered a predictor (to exclude, for example, a key column)  
+* Which ones must be excluded from the dataset because they are "near zero values" or because they have a very large percentage of missing values
+
+As a result from this mapping, from the 160 original variables, only 52 were eligible as a predictor. They were all numeric:  
+
+``` {r echo=FALSE, results='hide'}
+############################################
+# MAP VARIABLES
+############################################
+library(caret)
+
+# Map the variables
+metaQCol <- NCOL(dataTrain1)
+metaName <- names(dataTrain1)
+metaVarIndex <- c(1:metaQCol)
+
+metaClass1 <- vector(mode="character", length=metaQCol)
+            for (i in 1:metaQCol) metaClass1[i] <- class(dataTrain1[,i])
+
+metaNA <- vector(mode="integer", length=metaQCol)
+            for (i in 1:metaQCol) metaNA[i] <- sum(is.na(dataTrain1[,i]))
+
+metaNearZero  <- vector(mode="logical", length=metaQCol)
+            metaNearZero <- nearZeroVar(dataTrain1, saveMetrics=TRUE)$nzv
+
+metaMean <- vector(mode="numeric", length=metaQCol)
+            for (i in 1:metaQCol) metaMean[i] <- ifelse(metaClass1[i] %in% c("numeric", "integer"),
+                                                        mean(dataTrain1[,i]), NA)
+
+metaMedian <- vector(mode="numeric", length=metaQCol)
+            for (i in 1:metaQCol) metaMedian[i] <- ifelse(metaClass1[i] %in% c("numeric", "integer"),
+                                            median(dataTrain1[,i]), NA)
+
+metaQLevels <- vector(mode="integer", length=metaQCol)
+            for (i in 1:metaQCol) metaQLevels[i] <- length(unique(dataTrain1[,i]))
+            print(sort(unique(metaQLevels)))
+
+metaClass2 <- vector(mode="character", length=metaQCol)
+            metaClass2[metaClass1 == "factor"] <- "S"             # string
+            metaClass2[metaClass1 == "integer"] <- "I"            # integer
+            metaClass2[metaClass1 == "numeric"] <- "N"            # numeric
+            metaClass2[metaQLevels<10] <- "F"                     # factor
+            metaClass2[metaNearZero] <- "NZ"                      # near zero
+            metaClass2[metaNA > 0.80*NROW(dataTrain1)] <- "NA"    # full of NA
+            metaClass2[c(1:7, 160)] <- "NP"                       # not a predictor (keys, timestamp and classe)
+```
+
+The following table summarizes the 160 variables classification:  
+``` {r, echo=FALSE, results='markup'}
+print(table(metaClass2))
+```
+I: integer, N: numeric, NA: too many missing values, NP: not a predictor, NZ: near zero value, S: string, F: factor
+
+### 3) Plotting the predictors
+After selecting the elegible predictors, a density plot was made for each one, as in the *examples* below:  
+
+```{r echo=FALSE, fig.height=3, fig.width=5}
+############################################
+# EXPLORATORY PLOTS
+############################################
+setwd("./Graficos exploratorios")
+
+# Remove outliers
+DataOK <- vector(mode="logical", length=NROW(dataTrain1))
+DataOK[1:NROW(dataTrain1)] <- TRUE
+DataOK[dataTrain1$X==5373]=FALSE               # outlier in several dimensions
+
+
+# Density plots with numeric variables
+dataPlot <- data.frame(varOutput=dataTrain1$classe, varInput=dataTrain1[,"accel_arm_x"])
+qplot(varInput, data=dataPlot[DataOK,], geom="density",
+            color=varOutput, linetype=varOutput, xlab="accel_arm_x")
+
+dataPlot <- data.frame(varOutput=dataTrain1$classe, varInput=dataTrain1[,"magnet_arm_x"])
+qplot(varInput, data=dataPlot[DataOK,], geom="density",
+            color=varOutput, linetype=varOutput, xlab="magnet_arm_x")
+```
+
+Just like the examples above, many other variables presented a "wave" shape (what is expected if one consider that lift weigthing is a cicle movement).  No variable alone has appeared to be a very  good predictor.  
+
+Also based on this plottings, 1 outlier has been excluded.  
+
+A correlation matrix was made among these 52 variables. From the 1,326 pair of variables, only 90 pairs presented a correlation greater than 0.5 (in absolute value) and only 42 pairs were greater than 0.7.  This indicates an overall low level of correlation between variables.  
+
+
+### 4) Preprocessing the data
+All the preprocessing and creation of covariates was made during the development of the prediction model, when different preprocessing methods were tested.  
+
+### 5) Development of prediction model
+Since the dataset has a large number of numeric variables with an overall low correlation between them, the selected method was **generalized linear model**. This method was applied with 3 different preprocessing techniques:  
+* None (original variables)  
+* Standardization ("center" and "scale")  
+* PCA  
+
+The 3 models presented similar results (considering *accuracy*) and the first one was selected for its simplicity.  
+
+It was also necessary to create a model for each 'classe' to be predicted (A to E), since the generalized linear model predicts dicotomical variables.  
+
+The r-chunk below shows an exemple for "classe A". 
+
+``` {r echo=FALSE, results='hide'}
+# Numeric columns
+NumericColumns <- metaVarIndex[metaClass2=="N" | metaClass2=="I"]
+print(NumericColumns)
+
+Qinputs <- length(NumericColumns)
+dataModel1 <- data.frame(dataTrain1[DataOK, NumericColumns],
+                        "classe_A"=as.factor(dataTrain1$classe[DataOK]=="A"),
+                        "classe_B"=as.factor(dataTrain1$classe[DataOK]=="B"),
+                        "classe_C"=as.factor(dataTrain1$classe[DataOK]=="C"),
+                        "classe_D"=as.factor(dataTrain1$classe[DataOK]=="D"),
+                        "classe_E"=as.factor(dataTrain1$classe[DataOK]=="E"))
+dataModel2 <- data.frame(dataTrain2[NumericColumns],
+                       "classe_A"=as.factor(dataTrain2$classe=="A"),
+                       "classe_B"=as.factor(dataTrain2$classe=="B"),
+                       "classe_C"=as.factor(dataTrain2$classe=="C"),
+                       "classe_D"=as.factor(dataTrain2$classe=="D"),
+                       "classe_E"=as.factor(dataTrain2$classe=="E"))
+dataModel3 <- data.frame(dataTrain2[NumericColumns],
+                         "classe_A"=as.factor(dataTrain2$classe=="A"),
+                         "classe_B"=as.factor(dataTrain2$classe=="B"),
+                         "classe_C"=as.factor(dataTrain2$classe=="C"),
+                         "classe_D"=as.factor(dataTrain2$classe=="D"),
+                         "classe_E"=as.factor(dataTrain2$classe=="E"))
+dataTest <- data.frame(dataTestFull[NumericColumns],
+                       "classe_A"=NA,"classe_B"=NA, "classe_C"=NA, "classe_D"=NA, "classe_E"=NA)
+
+
+###########
+# CLASS A #
+###########
+modelColumns <- c(1:Qinputs, Qinputs + 1)
+
+```
+
+``` {r echo=TRUE, results='hide', warning=FALSE}
+# none pre-process
+ModelFit_A0 <- train(classe_A ~ ., data = dataModel1[,modelColumns], method="glm")
+```
+
+``` {r echo=FALSE, results='hide', warning=FALSE}
+Predict__A0_Train1 <- predict(ModelFit_A0, newdata=dataModel1)
+Predict__A0_Train2 <- predict(ModelFit_A0, newdata=dataModel2)
+Predict__A0_Train3 <- predict(ModelFit_A0, newdata=dataModel3)
+
+ConfMatrix_A0_Train1 <- confusionMatrix(Predict__A0_Train1, dataModel1$classe_A)
+ConfMatrix_A0_Train2 <- confusionMatrix(Predict__A0_Train2, dataModel2$classe_A)
+ConfMatrix_A0_Train3 <- confusionMatrix(Predict__A0_Train3, dataModel3$classe_A)
+
+dataTest$classe_A  <- predict(ModelFit_A0, newdata=dataTest)
+```
+
+``` {r echo=FALSE, results='hide', warning=FALSE}
+###########
+# CLASS B #
+###########
+
+modelColumns <- c(1:Qinputs, Qinputs + 2)
+
+# no pre-process
+ModelFit_B0 <- train(classe_B ~ ., data = dataModel1[,modelColumns], method="glm")
+
+Predict__B0_Train1 <- predict(ModelFit_B0, newdata=dataModel1)
+Predict__B0_Train2 <- predict(ModelFit_B0, newdata=dataModel2)
+Predict__B0_Train3 <- predict(ModelFit_B0, newdata=dataModel3)
+
+ConfMatrix_B0_Train1 <- confusionMatrix(Predict__B0_Train1, dataModel1$classe_B)
+ConfMatrix_B0_Train2 <- confusionMatrix(Predict__B0_Train2, dataModel2$classe_B)
+ConfMatrix_B0_Train3 <- confusionMatrix(Predict__B0_Train3, dataModel3$classe_B)
+
+dataTest$classe_B  <- predict(ModelFit_B0, newdata=dataTest)
+```
+
+``` {r echo=FALSE, results='hide', warning=FALSE}
+###########
+# CLASS C #
+###########
+
+modelColumns <- c(1:Qinputs, Qinputs + 3)
+
+# no pre-process
+ModelFit_C0 <- train(classe_C ~ ., data = dataModel1[,modelColumns], method="glm")
+
+Predict__C0_Train1 <- predict(ModelFit_C0, newdata=dataModel1)
+Predict__C0_Train2 <- predict(ModelFit_C0, newdata=dataModel2)
+Predict__C0_Train3 <- predict(ModelFit_C0, newdata=dataModel3)
+
+ConfMatrix_C0_Train1 <- confusionMatrix(Predict__C0_Train1, dataModel1$classe_C)
+ConfMatrix_C0_Train2 <- confusionMatrix(Predict__C0_Train2, dataModel2$classe_C)
+ConfMatrix_C0_Train3 <- confusionMatrix(Predict__C0_Train3, dataModel3$classe_C)
+
+dataTest$classe_C  <- predict(ModelFit_A0, newdata=dataTest)
+```
+
+``` {r echo=FALSE, results='markup', warning=FALSE}
+###########
+# CLASS D #
+###########
+
+modelColumns <- c(1:Qinputs, Qinputs + 4)
+
+# no pre-process
+ModelFit_D0 <- train(classe_D ~ ., data = dataModel1[,modelColumns], method="glm")
+
+Predict__D0_Train1 <- predict(ModelFit_D0, newdata=dataModel1)
+Predict__D0_Train2 <- predict(ModelFit_D0, newdata=dataModel2)
+Predict__D0_Train3 <- predict(ModelFit_D0, newdata=dataModel3)
+
+ConfMatrix_D0_Train1 <- confusionMatrix(Predict__D0_Train1, dataModel1$classe_D)
+ConfMatrix_D0_Train2 <- confusionMatrix(Predict__D0_Train2, dataModel2$classe_D)
+ConfMatrix_D0_Train3 <- confusionMatrix(Predict__D0_Train3, dataModel3$classe_D)
+
+dataTest$classe_D  <- predict(ModelFit_D0, newdata=dataTest)
+```
+
+``` {r echo=FALSE, results='hide', warning=FALSE}
+ 
+###########
+# CLASS E #
+###########
+
+modelColumns <- c(1:Qinputs, Qinputs + 5)
+
+# no pre-process
+ModelFit_E0 <- train(classe_E ~ ., data = dataModel1[,modelColumns], method="glm")
+
+Predict__E0_Train1 <- predict(ModelFit_E0, newdata=dataModel1)
+Predict__E0_Train2 <- predict(ModelFit_E0, newdata=dataModel2)
+Predict__E0_Train3 <- predict(ModelFit_E0, newdata=dataModel3)
+
+ConfMatrix_E0_Train1 <- confusionMatrix(Predict__E0_Train1, dataModel1$classe_E)
+ConfMatrix_E0_Train2 <- confusionMatrix(Predict__E0_Train2, dataModel2$classe_E)
+ConfMatrix_E0_Train3 <- confusionMatrix(Predict__E0_Train3, dataModel3$classe_E)
+
+dataTest$classe_E  <- predict(ModelFit_E0, newdata=dataTest)
+```
+
+
+### 6) Results, cross-validation and test
+The training sample generated models with accuracy between 86% and 90% for each classe. As an example, the results for "classe A" were:  
+
+``` {r echo=FALSE, results='markup'}
+print(ModelFit_A0)
+```
+
+To cross validate the results, the training model was applied to the 2nd sample. Since the results were very similar to the training sample (as expected, just a little bit worse), no changes were made to the training model. Then, the same model was applied to the test sample. The results (focused on *accuracy* index) are printed below.  
+
+``` {r echo=FALSE, results='markup'}
+##########
+# RESUMO #
+##########
+ResumoTrain1 <- rbind(ConfMatrix_A0_Train1$overall[1], 
+                      ConfMatrix_B0_Train1$overall[1], 
+                      ConfMatrix_C0_Train1$overall[1], 
+                      ConfMatrix_D0_Train1$overall[1], 
+                      ConfMatrix_E0_Train1$overall[1])
+
+ResumoTrain2 <- rbind(ConfMatrix_A0_Train2$overall[1], 
+                      ConfMatrix_B0_Train2$overall[1], 
+                      ConfMatrix_C0_Train2$overall[1], 
+                      ConfMatrix_D0_Train2$overall[1], 
+                      ConfMatrix_E0_Train2$overall[1])
+      
+ResumoTrain3 <- rbind(ConfMatrix_A0_Train3$overall[1], 
+                      ConfMatrix_B0_Train3$overall[1], 
+                      ConfMatrix_C0_Train3$overall[1], 
+                      ConfMatrix_D0_Train3$overall[1], 
+                      ConfMatrix_E0_Train3$overall[1])
+
+ResumoAccuracy <- data.frame(ResumoTrain1, ResumoTrain2, ResumoTrain3)
+rownames(ResumoAccuracy) <- c("A", "B", "C", "D", "E")
+colnames(ResumoAccuracy) <- c("Training", "Cross_Val", "Test")
+
+print(ResumoAccuracy)
+```
+
+
+## 7) Expected and final results
+Due to the results consistency between the training, cross validation and testing samples, the expected result was to achieve an accuracy between 85% and 90%.  
+
+When the model was applied to the 20 cases, the first result generated was:  
+
+``` {r echo=FALSE, results='markup'}
+TestSet <- data.frame("Classe_A"=dataTest$classe_A, 
+                       "Classe_B"=dataTest$classe_B, 
+                       "Classe_C"=dataTest$classe_C, 
+                       "Classe_D"=dataTest$classe_D, 
+                       "Classe_E"=dataTest$classe_E)
+
+print(TestSet)
+```
+
+The table above shows some cases with more than 1 possible classification and others with none. For these cases, individuals probabilites and confidence intervals were calculated, generating the final result:
+
+``` {r, echo=FALSE, results='markup'}
+resultados <- data.frame ("id"=c(1:20), 
+                          "PredClasse"=c("B", "A", "B", "A", "A", "E", "B", "B", "A", "A", 
+                                         "B", "A", "B", "A", "E", "E", "A", "B", "B", "B"))
+print(resultados)
+```
+
+When testing against the correct answers from Coursera, 18 cases (90%) were successfuly predicted.
