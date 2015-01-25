@@ -350,8 +350,6 @@ print(TestSet)
 The table above shows some cases with more than 1 possible classification and others with none. For these cases, individuals probabilites and confidence intervals were calculated, generating the final result:
 
 ``` {r, echo=FALSE, results='markup'}
-resultados <- data.frame ("id"=c(1:20), 
-
 print(resultados)
 ```
 
