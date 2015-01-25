@@ -351,8 +351,7 @@ The table above shows some cases with more than 1 possible classification and ot
 
 ``` {r, echo=FALSE, results='markup'}
 resultados <- data.frame ("id"=c(1:20), 
-                          "PredClasse"=c("B", "A", "B", "A", "A", "E", "B", "B", "A", "A", 
-                                         "B", "A", "B", "A", "E", "E", "A", "B", "B", "B"))
+
 print(resultados)
 ```
 
